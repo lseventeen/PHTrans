@@ -1,4 +1,5 @@
 wandb
-PHTrans/phtrans.egg-info
+*egg-info
 .vscode
-*.model
+*visualization.py
+*__pycache__*

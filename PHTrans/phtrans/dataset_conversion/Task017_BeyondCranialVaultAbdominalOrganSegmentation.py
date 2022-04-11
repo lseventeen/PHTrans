@@ -1,18 +1,3 @@
-#    Copyright 2020 Division of Medical Image Computing, German Cancer Research Center (DKFZ), Heidelberg, Germany
-#
-#    Licensed under the Apache License, Version 2.0 (the "License");
-#    you may not use this file except in compliance with the License.
-#    You may obtain a copy of the License at
-#
-#        http://www.apache.org/licenses/LICENSE-2.0
-#
-#    Unless required by applicable law or agreed to in writing, software
-#    distributed under the License is distributed on an "AS IS" BASIS,
-#    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#    See the License for the specific language governing permissions and
-#    limitations under the License.
-
-
 from collections import OrderedDict
 from nnunet.paths import nnUNet_raw_data
 from batchgenerators.utilities.file_and_folder_operations import *
@@ -43,32 +28,33 @@ if __name__ == "__main__":
     maybe_mkdir_p(labelstr)
     maybe_mkdir_p(labelsts)
 
-    val_id = test_id = [1,2,3,4,8,22,25,29,32,35,36,38]
+    val_id = test_id = [1, 2, 3, 4, 8, 22, 25, 29, 32, 35, 36, 38]
     img_folder = join(base, "Training/img")
     label_folder = join(base, "Training/label")
     train_patient_names = []
     test_patient_names = []
-    train_patients = subfiles(img_folder, join=False, suffix = 'nii.gz')
-    
+    train_patients = subfiles(img_folder, join=False, suffix='nii.gz')
+
     for p in train_patients:
         serial_number = int(p[3:7])
         train_patient_name = f'{prefix}_{serial_number:03d}.nii.gz'
         label_file = join(label_folder, f'label{p[3:]}')
         image_file = join(img_folder, p)
-        shutil.copy(image_file, join(imagestr, f'{train_patient_name[:7]}_0000.nii.gz'))
+        shutil.copy(image_file, join(
+            imagestr, f'{train_patient_name[:7]}_0000.nii.gz'))
         shutil.copy(label_file, join(labelstr, train_patient_name))
-        train_patient_names.append(train_patient_name)  
+        train_patient_names.append(train_patient_name)
 
     # test_patients = subfiles(test_folder, join=False, suffix=".nii.gz")
     for p in test_id:
-        test_patient = f"img{p:04d}.nii.gz" 
+        test_patient = f"img{p:04d}.nii.gz"
         test_patient_name = f'{prefix}_{p:03d}.nii.gz'
         label_file = join(label_folder, f'label{test_patient[3:]}')
         image_file = join(img_folder, test_patient)
-        shutil.copy(image_file, join(imagests, f'{test_patient_name[:7]}_0000.nii.gz'))
+        shutil.copy(image_file, join(
+            imagests, f'{test_patient_name[:7]}_0000.nii.gz'))
         shutil.copy(label_file, join(labelsts, test_patient_name))
         test_patient_names.append(test_patient_name)
-
 
     json_dict = OrderedDict()
     json_dict['name'] = "AbdominalOrganSegmentation"
@@ -96,19 +82,22 @@ if __name__ == "__main__":
         "12": "right adrenal gland",
         "13": "left adrenal gland"}
     )
-    json_dict['evaluationClass'] = [8,4,3,2,6,11,1,7]
+    json_dict['evaluationClass'] = [8, 4, 3, 2, 6, 11, 1, 7]
     json_dict['numTraining'] = len(train_patient_names)
     json_dict['numTest'] = len(test_patient_names)
-  
-    json_dict['test'] = ["./imagesTs/%s" % test_patient_name for test_patient_name in test_patient_names]
 
-    json_dict['training'] = [{'image': "./imagesTr/%s" % train_patient_name, "label": "./labelsTr/%s" % train_patient_name} for train_patient_name in train_patient_names]
-   
+    json_dict['test'] = ["./imagesTs/%s" %
+                         test_patient_name for test_patient_name in test_patient_names]
+
+    json_dict['training'] = [{'image': "./imagesTr/%s" % train_patient_name,
+                              "label": "./labelsTr/%s" % train_patient_name} for train_patient_name in train_patient_names]
 
     save_json(json_dict, os.path.join(out_base, "dataset.json"))
-    
+
     splits = []
-    splits.append(OrderedDict())  
-    splits[-1]['train'] = [i[:7] for i in train_patient_names if int(i[4:7]) not in val_id]
-    splits[-1]['val'] = [i[:7] for i in train_patient_names if int(i[4:7]) in val_id]
+    splits.append(OrderedDict())
+    splits[-1]['train'] = [i[:7]
+                           for i in train_patient_names if int(i[4:7]) not in val_id]
+    splits[-1]['val'] = [i[:7]
+                         for i in train_patient_names if int(i[4:7]) in val_id]
     save_pickle(splits, join(out_base, "splits_final.pkl"))

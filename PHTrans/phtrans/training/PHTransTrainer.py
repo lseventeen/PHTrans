@@ -1,23 +1,10 @@
-#    Copyright 2020 Division of Medical Image Computing, German Cancer Research Center (DKFZ), Heidelberg, Germany
-#
-#    Licensed under the Apache License, Version 2.0 (the "License");
-#    you may not use this file except in compliance with the License.
-#    You may obtain a copy of the License at
-#
-#        http://www.apache.org/licenses/LICENSE-2.0
-#
-#    Unless required by applicable law or agreed to in writing, software
-#    distributed under the License is distributed on an "AS IS" BASIS,
-#    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#    See the License for the specific language governing permissions and
-#    limitations under the License.
 import torch.backends.cudnn as cudnn
 from time import time
 from _warnings import warn
 from tqdm import trange
 from collections import OrderedDict
 from typing import Tuple
-from thop import profile,clever_format
+from thop import profile, clever_format
 import numpy as np
 import torch
 import wandb
@@ -26,7 +13,7 @@ from nnunet.training.data_augmentation.data_augmentation_moreDA import get_moreD
 from nnunet.training.loss_functions.deep_supervision import MultipleOutputLoss2
 from nnunet.utilities.to_torch import maybe_to_torch, to_cuda
 from nnunet.network_architecture.generic_UNet import Generic_UNet
-from phtrans.network_architecture.phtrans  import PHTrans
+from phtrans.network_architecture.phtrans import PHTrans
 from nnunet.network_architecture.initialization import InitWeights_He
 from nnunet.network_architecture.neural_network import SegmentationNetwork
 from nnunet.training.data_augmentation.default_data_augmentation import default_2D_augmentation_params, \
@@ -48,25 +35,26 @@ class PHTransTrainer(nnUNetTrainer):
     """
 
     def __init__(self, plans_file, fold, output_folder=None, dataset_directory=None, batch_dice=True, stage=None,
-                 unpack_data=True, deterministic=True, fp16=False, experiment_id = None, custom_batch_size=None,
-                 custom_network=False, task_id = None):
-        
+                 unpack_data=True, deterministic=True, fp16=False, experiment_id=None, custom_batch_size=None,
+                 custom_network=False, task_id=None, count_params=False):
 
         os.environ['nnunet_use_progress_bar'] = "1"
         self.experiment_id = experiment_id
         super().__init__(plans_file, fold, output_folder, dataset_directory, batch_dice, stage, unpack_data,
                          deterministic, fp16)
         self.init_args = (plans_file, fold, output_folder, dataset_directory, batch_dice, stage, unpack_data,
-                          deterministic, fp16,experiment_id, custom_batch_size, custom_network, task_id)
+                          deterministic, fp16, experiment_id, custom_batch_size, custom_network, task_id)
         self.max_num_epochs = 1000
         self.initial_lr = 1e-2
         self.deep_supervision_scales = None
         self.ds_loss_weights = None
-        self.pin_memory = True  
+        self.pin_memory = True
         self.custom_batch_size = custom_batch_size
         self.custom_network = custom_network
         self.task_id = task_id
         self.average_global_dc = 0
+        self.count_params = count_params
+
     def initialize(self, training=True, force_load_plans=False, nnunet=True):
         """
         - replaced get_default_augmentation with get_moreDA_augmentation
@@ -88,16 +76,16 @@ class PHTransTrainer(nnUNetTrainer):
             self.setup_DA_params()
 
             ################# Here we wrap the loss for deep supervision ############
-            
-        
+
             net_numpool = len(self.net_num_pool_op_kernel_sizes)
-            
+
             # we give each output a weight which decreases exponentially (division by 2) as the resolution decreases
             # this gives higher resolution outputs more weight in the loss
             weights = np.array([1 / (2 ** i) for i in range(net_numpool)])
 
             # we don't use the lowest 2 outputs. Normalize weights so that they sum to 1
-            mask = np.array([True] + [True if i < net_numpool - 1 else False for i in range(1, net_numpool)])
+            mask = np.array([True] + [True if i < net_numpool -
+                            1 else False for i in range(1, net_numpool)])
             weights[~mask] = 0
             weights = weights / weights.sum()
             self.ds_loss_weights = weights
@@ -137,12 +125,14 @@ class PHTransTrainer(nnUNetTrainer):
             self.initialize_network(nnunet=nnunet)
             self.initialize_optimizer_and_scheduler()
 
-            assert isinstance(self.network, (SegmentationNetwork, nn.DataParallel))
+            assert isinstance(
+                self.network, (SegmentationNetwork, nn.DataParallel))
         else:
-            self.print_to_log_file('self.was_initialized is True, not running self.initialize again')
+            self.print_to_log_file(
+                'self.was_initialized is True, not running self.initialize again')
         self.was_initialized = True
 
-    def initialize_network(self,nnunet=True):
+    def initialize_network(self, nnunet=True):
         """
         - momentum 0.99
         - SGD instead of Adam
@@ -162,41 +152,40 @@ class PHTransTrainer(nnUNetTrainer):
             conv_op = nn.Conv2d
             dropout_op = nn.Dropout2d
             norm_op = nn.InstanceNorm2d
-
         norm_op_kwargs = {'eps': 1e-5, 'affine': True}
-        dropout_op_kwargs = {'p': 0.1, 'inplace': True}
-        # net_nonlin = nn.LeakyReLU
-        net_nonlin = nn.GELU
+        dropout_op_kwargs = {'p': 0, 'inplace': True}
+        net_nonlin = nn.LeakyReLU
         net_nonlin_kwargs = {'negative_slope': 1e-2, 'inplace': True}
+
         if self.custom_network is None:
             net_nonlin = nn.LeakyReLU
             self.network = Generic_UNet(self.num_input_channels, self.base_num_features, self.num_classes,
-                                    len(self.net_num_pool_op_kernel_sizes),
-                                    self.conv_per_stage, 2, conv_op, norm_op, norm_op_kwargs, dropout_op,
-                                    dropout_op_kwargs,
-                                    net_nonlin, net_nonlin_kwargs, True, False, lambda x: x, InitWeights_He(1e-2),
-                                    self.net_num_pool_op_kernel_sizes, self.net_conv_kernel_sizes, False, True, True)
-        elif self.custom_network == "PHTrans" and self.task_id == 17:    
-            self.network = PHTrans(img_size = self.patch_size,  base_num_features=24, 
-                                    num_classes=self.num_classes, num_pool=len(self.net_num_pool_op_kernel_sizes), image_channels=self.num_input_channels,
-                                    num_only_conv_stage=2,num_conv_per_stage=2,feat_map_mul_on_downscale=2, conv_op=conv_op,conv_groups=False,
-                                    norm_op=norm_op, norm_op_kwargs=norm_op_kwargs,dropout_op=dropout_op, dropout_op_kwargs=dropout_op_kwargs,
-                                    nonlin=net_nonlin, nonlin_kwargs=net_nonlin_kwargs, deep_supervision=True,                                                                                      
-                                    weightInitializer=InitWeights_He(1e-2), pool_op_kernel_sizes=self.net_num_pool_op_kernel_sizes,
-                                    conv_kernel_sizes=self.net_conv_kernel_sizes, max_num_features_factor=13, depths=[2, 2, 2, 2], num_heads=[3, 6, 12, 24],
-                                    window_size=[3,6,6], mlp_ratio=4., qkv_bias=True, qk_scale=None,drop_rate=0., attn_drop_rate=0., 
-                                    drop_path_rate=0.2,norm_layer=nn.LayerNorm, use_checkpoint=False,)
-        total = sum([param.nelement() for param in self.network.parameters()])
-        print('  + Number of Network Params: %.2f(e6)' % (total / 1e6))
-       
+                                        len(self.net_num_pool_op_kernel_sizes),
+                                        self.conv_per_stage, 2, conv_op, norm_op, norm_op_kwargs, dropout_op,
+                                        dropout_op_kwargs,
+                                        net_nonlin, net_nonlin_kwargs, True, False, lambda x: x, InitWeights_He(
+                                            1e-2),
+                                        self.net_num_pool_op_kernel_sizes, self.net_conv_kernel_sizes, False, True, True)
+        elif self.custom_network == "PHTrans" and self.task_id == 17:
+            self.network = PHTrans(img_size=self.patch_size,  base_num_features=24,
+                                   num_classes=self.num_classes, num_pool=len(self.net_num_pool_op_kernel_sizes), image_channels=self.num_input_channels,
+                                   num_only_conv_stage=2, num_conv_per_stage=2, feat_map_mul_on_downscale=2, conv_op=conv_op,
+                                   norm_op=norm_op, norm_op_kwargs={'eps': 1e-5, 'affine': True}, dropout_op=dropout_op, dropout_op_kwargs={'p': 0.1, 'inplace': True},
+                                   nonlin=nn.GELU, nonlin_kwargs={'negative_slope': 1e-2, 'inplace': True}, deep_supervision=True,
+                                   weightInitializer=InitWeights_He(1e-2), pool_op_kernel_sizes=self.net_num_pool_op_kernel_sizes,
+                                   conv_kernel_sizes=self.net_conv_kernel_sizes, max_num_features_factor=13, depths=[2, 2, 2, 2], num_heads=[3, 6, 12, 24],
+                                   window_size=[3, 6, 6], mlp_ratio=4., qkv_bias=True, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
+                                   drop_path_rate=0.2, norm_layer=nn.LayerNorm, use_checkpoint=False,)
+
         if torch.cuda.is_available():
             self.network.cuda()
-        # wandb.watch(self.network)
         self.network.inference_apply_nonlin = softmax_helper
-        # input = torch.randn(1,1, 48, 192, 192).cuda()
-        # macs, params = profile(self.network.cuda(), inputs=(input, ))
-        # macs, params = clever_format([macs, params], "%.3f")
-        # print( macs,params)
+        if self.count_params:
+            input = torch.randn(1, 1, 48, 192, 192).cuda()
+            macs, params = profile(self.network.cuda(), inputs=(input, ))
+            macs, params = clever_format([macs, params], "%.3f")
+            print(f"Flops: {macs/2}  params:{params}")
+
     def initialize_optimizer_and_scheduler(self):
         assert self.network is not None, "self.initialize_network must be called first"
         self.optimizer = torch.optim.SGD(self.network.parameters(), self.initial_lr, weight_decay=self.weight_decay,
@@ -243,6 +232,7 @@ class PHTransTrainer(nnUNetTrainer):
                                                                        mixed_precision=mixed_precision)
         self.network.do_ds = ds
         return ret
+
     def update_fold(self, fold):
         """
         used to swap between folds for inference (ensemble of models from cross-validation)
@@ -255,13 +245,15 @@ class PHTransTrainer(nnUNetTrainer):
                 assert fold == "all", "if self.fold is a string then it must be \'all\'"
                 if self.output_folder.endswith("%s" % str(self.fold)):
                     self.output_folder = self.output_folder_base
-                self.output_folder = join(self.output_folder, "%s" % str(fold),self.experiment_id)
+                self.output_folder = join(
+                    self.output_folder, "%s" % str(fold), self.experiment_id)
             else:
                 if self.output_folder.endswith("fold_%s" % str(self.fold)):
                     self.output_folder = self.output_folder_base
-                self.output_folder = join(self.output_folder, "fold_%s" % str(fold),self.experiment_id)
+                self.output_folder = join(
+                    self.output_folder, "fold_%s" % str(fold), self.experiment_id)
             self.fold = fold
-    
+
     def run_iteration(self, data_generator, do_backprop=True, run_online_evaluation=False):
         """
         gradient clipping improves training stability
@@ -283,7 +275,7 @@ class PHTransTrainer(nnUNetTrainer):
             target = to_cuda(target)
 
         self.optimizer.zero_grad()
-  
+
         if self.fp16:
             with autocast():
                 output = self.network(data)
@@ -331,7 +323,8 @@ class PHTransTrainer(nnUNetTrainer):
 
             # if the split file does not exist we need to create it
             if not isfile(splits_file):
-                self.print_to_log_file("Creating new 5-fold cross-validation split...")
+                self.print_to_log_file(
+                    "Creating new 5-fold cross-validation split...")
                 splits = []
                 all_keys_sorted = np.sort(list(self.dataset.keys()))
                 kfold = KFold(n_splits=5, shuffle=True, random_state=12345)
@@ -344,13 +337,14 @@ class PHTransTrainer(nnUNetTrainer):
                 save_pickle(splits, splits_file)
 
             else:
-                self.print_to_log_file("Using splits from existing split file:", splits_file)
+                self.print_to_log_file(
+                    "Using splits from existing split file:", splits_file)
                 splits = load_pickle(splits_file)
-                self.print_to_log_file("The split file contains %d splits." % len(splits))
+                self.print_to_log_file(
+                    "The split file contains %d splits." % len(splits))
 
             self.print_to_log_file("Desired fold for training: %d" % self.fold)
-            
-            
+
             if self.fold < len(splits):
                 tr_keys = splits[self.fold]['train']
                 val_keys = splits[self.fold]['val']
@@ -363,7 +357,8 @@ class PHTransTrainer(nnUNetTrainer):
                 # if we request a fold that is not in the split file, create a random 80:20 split
                 rnd = np.random.RandomState(seed=12345 + self.fold)
                 keys = np.sort(list(self.dataset.keys()))
-                idx_tr = rnd.choice(len(keys), int(len(keys) * 0.8), replace=False)
+                idx_tr = rnd.choice(len(keys), int(
+                    len(keys) * 0.8), replace=False)
                 idx_val = [i for i in range(len(keys)) if i not in idx_tr]
                 tr_keys = [keys[i] for i in idx_tr]
                 val_keys = [keys[i] for i in idx_val]
@@ -393,9 +388,12 @@ class PHTransTrainer(nnUNetTrainer):
 
         if self.threeD:
             self.data_aug_params = default_3D_augmentation_params
-            self.data_aug_params['rotation_x'] = (-30. / 360 * 2. * np.pi, 30. / 360 * 2. * np.pi)
-            self.data_aug_params['rotation_y'] = (-30. / 360 * 2. * np.pi, 30. / 360 * 2. * np.pi)
-            self.data_aug_params['rotation_z'] = (-30. / 360 * 2. * np.pi, 30. / 360 * 2. * np.pi)
+            self.data_aug_params['rotation_x'] = (
+                -30. / 360 * 2. * np.pi, 30. / 360 * 2. * np.pi)
+            self.data_aug_params['rotation_y'] = (
+                -30. / 360 * 2. * np.pi, 30. / 360 * 2. * np.pi)
+            self.data_aug_params['rotation_z'] = (
+                -30. / 360 * 2. * np.pi, 30. / 360 * 2. * np.pi)
             if self.do_dummy_2D_aug:
                 self.data_aug_params["dummy_2D"] = True
                 self.print_to_log_file("Using dummy2d data augmentation")
@@ -407,7 +405,8 @@ class PHTransTrainer(nnUNetTrainer):
         else:
             self.do_dummy_2D_aug = False
             if max(self.patch_size) / min(self.patch_size) > 1.5:
-                default_2D_augmentation_params['rotation_x'] = (-15. / 360 * 2. * np.pi, 15. / 360 * 2. * np.pi)
+                default_2D_augmentation_params['rotation_x'] = (
+                    -15. / 360 * 2. * np.pi, 15. / 360 * 2. * np.pi)
             self.data_aug_params = default_2D_augmentation_params
         self.data_aug_params["mask_was_used_for_normalization"] = self.use_mask_for_norm
 
@@ -417,7 +416,8 @@ class PHTransTrainer(nnUNetTrainer):
                                                              self.data_aug_params['rotation_y'],
                                                              self.data_aug_params['rotation_z'],
                                                              self.data_aug_params['scale_range'])
-            self.basic_generator_patch_size = np.array([self.patch_size[0]] + list(self.basic_generator_patch_size))
+            self.basic_generator_patch_size = np.array(
+                [self.patch_size[0]] + list(self.basic_generator_patch_size))
         else:
             self.basic_generator_patch_size = get_patch_size(self.patch_size, self.data_aug_params['rotation_x'],
                                                              self.data_aug_params['rotation_y'],
@@ -445,8 +445,10 @@ class PHTransTrainer(nnUNetTrainer):
             ep = self.epoch + 1
         else:
             ep = epoch
-        self.optimizer.param_groups[0]['lr'] = poly_lr(ep, self.max_num_epochs, self.initial_lr, 0.9)
-        self.print_to_log_file("lr:", np.round(self.optimizer.param_groups[0]['lr'], decimals=6))
+        self.optimizer.param_groups[0]['lr'] = poly_lr(
+            ep, self.max_num_epochs, self.initial_lr, 0.9)
+        self.print_to_log_file("lr:", np.round(
+            self.optimizer.param_groups[0]['lr'], decimals=6))
 
     def on_epoch_end(self):
         """
@@ -476,52 +478,67 @@ class PHTransTrainer(nnUNetTrainer):
         we also need to make sure deep supervision in the network is enabled for training, thus the wrapper
         :return:
         """
-        self.maybe_update_lr(self.epoch)  # if we dont overwrite epoch then self.epoch+1 is used which is not what we
+        self.maybe_update_lr(
+            self.epoch)  # if we dont overwrite epoch then self.epoch+1 is used which is not what we
         # want at the start of the training
         ds = self.network.do_ds
         self.network.do_ds = True
         ret = super().run_training()
         self.network.do_ds = ds
         return ret
+
     def run_online_evaluation(self, output, target):
         target = target[0]
         output = output[0]
         with torch.no_grad():
-                num_classes = output.shape[1]
-                output_softmax = softmax_helper(output)
-                output_seg = output_softmax.argmax(1)
-                target = target[:, 0]
-                axes = tuple(range(1, len(target.shape)))
+            num_classes = output.shape[1]
+            output_softmax = softmax_helper(output)
+            output_seg = output_softmax.argmax(1)
+            target = target[:, 0]
+            axes = tuple(range(1, len(target.shape)))
 
-                if self.task_id == 17:
-                    tp_hard = torch.zeros((target.shape[0], 8)).to(output_seg.device.index)
-                    fp_hard = torch.zeros((target.shape[0], 8)).to(output_seg.device.index)
-                    fn_hard = torch.zeros((target.shape[0], 8)).to(output_seg.device.index)
-                    i=0
-                    for c in range(1, num_classes):
-                        if c in [10,12,13,5,9]:
-                            continue
-                        tp_hard[:, i] = sum_tensor((output_seg == c).float() * (target == c).float(), axes=axes)
-                        fp_hard[:, i] = sum_tensor((output_seg == c).float() * (target != c).float(), axes=axes)
-                        fn_hard[:, i] = sum_tensor((output_seg != c).float() * (target == c).float(), axes=axes)
-                        i+=1
-                else:
-                    tp_hard = torch.zeros((target.shape[0], num_classes - 1)).to(output_seg.device.index)
-                    fp_hard = torch.zeros((target.shape[0], num_classes - 1)).to(output_seg.device.index)
-                    fn_hard = torch.zeros((target.shape[0], num_classes - 1)).to(output_seg.device.index)
-                    for c in range(1, num_classes):
-                        tp_hard[:, c - 1] = sum_tensor((output_seg == c).float() * (target == c).float(), axes=axes)
-                        fp_hard[:, c - 1] = sum_tensor((output_seg == c).float() * (target != c).float(), axes=axes)
-                        fn_hard[:, c - 1] = sum_tensor((output_seg != c).float() * (target == c).float(), axes=axes)
+            if self.task_id == 17:
+                tp_hard = torch.zeros((target.shape[0], 8)).to(
+                    output_seg.device.index)
+                fp_hard = torch.zeros((target.shape[0], 8)).to(
+                    output_seg.device.index)
+                fn_hard = torch.zeros((target.shape[0], 8)).to(
+                    output_seg.device.index)
+                i = 0
+                for c in range(1, num_classes):
+                    if c in [10, 12, 13, 5, 9]:
+                        continue
+                    tp_hard[:, i] = sum_tensor(
+                        (output_seg == c).float() * (target == c).float(), axes=axes)
+                    fp_hard[:, i] = sum_tensor(
+                        (output_seg == c).float() * (target != c).float(), axes=axes)
+                    fn_hard[:, i] = sum_tensor(
+                        (output_seg != c).float() * (target == c).float(), axes=axes)
+                    i += 1
+            else:
+                tp_hard = torch.zeros(
+                    (target.shape[0], num_classes - 1)).to(output_seg.device.index)
+                fp_hard = torch.zeros(
+                    (target.shape[0], num_classes - 1)).to(output_seg.device.index)
+                fn_hard = torch.zeros(
+                    (target.shape[0], num_classes - 1)).to(output_seg.device.index)
+                for c in range(1, num_classes):
+                    tp_hard[:, c - 1] = sum_tensor(
+                        (output_seg == c).float() * (target == c).float(), axes=axes)
+                    fp_hard[:, c - 1] = sum_tensor(
+                        (output_seg == c).float() * (target != c).float(), axes=axes)
+                    fn_hard[:, c - 1] = sum_tensor(
+                        (output_seg != c).float() * (target == c).float(), axes=axes)
 
-                tp_hard = tp_hard.sum(0, keepdim=False).detach().cpu().numpy()
-                fp_hard = fp_hard.sum(0, keepdim=False).detach().cpu().numpy()
-                fn_hard = fn_hard.sum(0, keepdim=False).detach().cpu().numpy()  
+            tp_hard = tp_hard.sum(0, keepdim=False).detach().cpu().numpy()
+            fp_hard = fp_hard.sum(0, keepdim=False).detach().cpu().numpy()
+            fn_hard = fn_hard.sum(0, keepdim=False).detach().cpu().numpy()
 
-                self.online_eval_foreground_dc.append(list((2 * tp_hard) / (2 * tp_hard + fp_hard + fn_hard + 1e-8)))
-                self.online_eval_tp.append(list(tp_hard))
-                self.online_eval_fp.append(list(fp_hard))
-                self.online_eval_fn.append(list(fn_hard))
+            self.online_eval_foreground_dc.append(
+                list((2 * tp_hard) / (2 * tp_hard + fp_hard + fn_hard + 1e-8)))
+            self.online_eval_tp.append(list(tp_hard))
+            self.online_eval_fp.append(list(fp_hard))
+            self.online_eval_fn.append(list(fn_hard))
 
     def process_plans(self, plans):
         if self.stage is None:
@@ -534,29 +551,34 @@ class PHTransTrainer(nnUNetTrainer):
         stage_plans = self.plans['plans_per_stage'][self.stage]
         if self.custom_batch_size is not None and self.custom_batch_size > stage_plans['batch_size']:
             self.batch_size = self.custom_batch_size
-            self.num_batches_per_epoch = int(self.num_batches_per_epoch // (self.custom_batch_size / stage_plans['batch_size']))
-            self.num_val_batches_per_epoch = int(self.num_val_batches_per_epoch // (self.custom_batch_size / stage_plans['batch_size']))
+            self.num_batches_per_epoch = int(
+                self.num_batches_per_epoch // (self.custom_batch_size / stage_plans['batch_size']))
+            self.num_val_batches_per_epoch = int(
+                self.num_val_batches_per_epoch // (self.custom_batch_size / stage_plans['batch_size']))
         elif self.custom_batch_size is not None and self.custom_batch_size < stage_plans['batch_size']:
             self.batch_size = self.custom_batch_size
-            self.num_batches_per_epoch = int(self.num_batches_per_epoch * (stage_plans['batch_size'] / self.custom_batch_size))
-            self.num_val_batches_per_epoch = int(self.num_val_batches_per_epoch * (stage_plans['batch_size'] / self.custom_batch_size))
+            self.num_batches_per_epoch = int(
+                self.num_batches_per_epoch * (stage_plans['batch_size'] / self.custom_batch_size))
+            self.num_val_batches_per_epoch = int(
+                self.num_val_batches_per_epoch * (stage_plans['batch_size'] / self.custom_batch_size))
         else:
             self.batch_size = stage_plans['batch_size']
         self.net_pool_per_axis = stage_plans['num_pool_per_axis']
         # if self.custom_patch_size is not None:
-        #     self.patch_size = self.custom_patch_size 
-        if self.custom_network == "phtrans" and self.task_id == 27:   
-            self.patch_size = np.array([16,256,224])
+        #     self.patch_size = self.custom_patch_size
+        if self.custom_network == "phtrans" and self.task_id == 27:
+            self.patch_size = np.array([16, 256, 224])
         else:
             self.patch_size = np.array(stage_plans['patch_size']).astype(int)
 
         self.print_to_log_file(f"\n batch_size : {self.batch_size}\n patch_size : {self.patch_size} \n num_batches_per_epoch : {self.num_batches_per_epoch} \
                               \n num_val_batches_per_epoch : {self.num_val_batches_per_epoch}")
         self.do_dummy_2D_aug = stage_plans['do_dummy_2D_data_aug']
-        
+
         if 'pool_op_kernel_sizes' not in stage_plans.keys():
             assert 'num_pool_per_axis' in stage_plans.keys()
-            self.print_to_log_file("WARNING! old plans file with missing pool_op_kernel_sizes. Attempting to fix it...")
+            self.print_to_log_file(
+                "WARNING! old plans file with missing pool_op_kernel_sizes. Attempting to fix it...")
             self.net_num_pool_op_kernel_sizes = []
             for i in range(max(self.net_pool_per_axis)):
                 curr = []
@@ -568,10 +590,12 @@ class PHTransTrainer(nnUNetTrainer):
                 self.net_num_pool_op_kernel_sizes.append(curr)
         else:
             self.net_num_pool_op_kernel_sizes = stage_plans['pool_op_kernel_sizes']
-           
+
         if 'conv_kernel_sizes' not in stage_plans.keys():
-            self.print_to_log_file("WARNING! old plans file with missing conv_kernel_sizes. Attempting to fix it...")
-            self.net_conv_kernel_sizes = [[3] * len(self.net_pool_per_axis)] * (max(self.net_pool_per_axis) + 1)
+            self.print_to_log_file(
+                "WARNING! old plans file with missing conv_kernel_sizes. Attempting to fix it...")
+            self.net_conv_kernel_sizes = [
+                [3] * len(self.net_pool_per_axis)] * (max(self.net_pool_per_axis) + 1)
         else:
             self.net_conv_kernel_sizes = stage_plans['conv_kernel_sizes']
 
@@ -580,12 +604,14 @@ class PHTransTrainer(nnUNetTrainer):
         self.normalization_schemes = plans['normalization_schemes']
         self.base_num_features = plans['base_num_features']
         self.num_input_channels = plans['num_modalities']
-        self.num_classes = plans['num_classes'] + 1  # background is no longer in num_classes
+        # background is no longer in num_classes
+        self.num_classes = plans['num_classes'] + 1
         self.classes = plans['all_classes']
         self.use_mask_for_norm = plans['use_mask_for_norm']
         self.only_keep_largest_connected_component = plans['keep_only_largest_region']
         self.min_region_size_per_class = plans['min_region_size_per_class']
-        self.min_size_per_class = None  # DONT USE THIS. plans['min_size_per_class']
+        # DONT USE THIS. plans['min_size_per_class']
+        self.min_size_per_class = None
 
         if plans.get('transpose_forward') is None or plans.get('transpose_backward') is None:
             print("WARNING! You seem to have data that was preprocessed with a previous version of nnU-Net. "
@@ -601,15 +627,18 @@ class PHTransTrainer(nnUNetTrainer):
         elif len(self.patch_size) == 3:
             self.threeD = True
         else:
-            raise RuntimeError("invalid patch size in plans file: %s" % str(self.patch_size))
+            raise RuntimeError(
+                "invalid patch size in plans file: %s" % str(self.patch_size))
 
         if "conv_per_stage" in plans.keys():  # this ha sbeen added to the plans only recently
             self.conv_per_stage = plans['conv_per_stage']
         else:
             self.conv_per_stage = 2
+
     def run_training(self):
         if not torch.cuda.is_available():
-            self.print_to_log_file("WARNING!!! You are attempting to run training on a CPU (torch.cuda.is_available() is False). This can be VERY slow!")
+            self.print_to_log_file(
+                "WARNING!!! You are attempting to run training on a CPU (torch.cuda.is_available() is False). This can be VERY slow!")
 
         _ = self.tr_gen.next()
         _ = self.val_gen.next()
@@ -619,7 +648,7 @@ class PHTransTrainer(nnUNetTrainer):
 
         self._maybe_init_amp()
 
-        maybe_mkdir_p(self.output_folder)        
+        maybe_mkdir_p(self.output_folder)
         self.plot_network_architecture()
 
         if cudnn.benchmark and cudnn.deterministic:
@@ -641,7 +670,8 @@ class PHTransTrainer(nnUNetTrainer):
             if self.use_progress_bar:
                 with trange(self.num_batches_per_epoch) as tbar:
                     for b in tbar:
-                        tbar.set_description("Epoch {}/{}".format(self.epoch+1, self.max_num_epochs))
+                        tbar.set_description(
+                            "Epoch {}/{}".format(self.epoch+1, self.max_num_epochs))
 
                         l = self.run_iteration(self.tr_gen, True, True)
 
@@ -654,7 +684,8 @@ class PHTransTrainer(nnUNetTrainer):
 
             train_loss_mean = np.mean(train_losses_epoch)
             self.all_tr_losses.append(train_loss_mean)
-            self.print_to_log_file("train loss : %.4f" % self.all_tr_losses[-1])
+            self.print_to_log_file("train loss : %.4f" %
+                                   self.all_tr_losses[-1])
 
             with torch.no_grad():
                 # validation with train=False
@@ -665,7 +696,8 @@ class PHTransTrainer(nnUNetTrainer):
                     val_losses.append(l)
                 val_loss_mean = np.mean(val_losses)
                 self.all_val_losses.append(val_loss_mean)
-                self.print_to_log_file("validation loss: %.4f" % self.all_val_losses[-1])
+                self.print_to_log_file(
+                    "validation loss: %.4f" % self.all_val_losses[-1])
 
                 if self.also_val_in_tr_mode:
                     self.network.train()
@@ -675,28 +707,33 @@ class PHTransTrainer(nnUNetTrainer):
                         l = self.run_iteration(self.val_gen, False)
                         val_losses.append(l)
                     self.all_val_losses_tr_mode.append(np.mean(val_losses))
-                    self.print_to_log_file("validation loss (train=True): %.4f" % self.all_val_losses_tr_mode[-1])
-            
+                    self.print_to_log_file(
+                        "validation loss (train=True): %.4f" % self.all_val_losses_tr_mode[-1])
+
             self.update_train_loss_MA()  # needed for lr scheduler and stopping of training
 
             continue_training = self.on_epoch_end()
 
             epoch_end_time = time()
             wandb.log({'train_loss': train_loss_mean,
-                        'val_loss': val_loss_mean,
-                        'val_dice':self.average_global_dc,
-                        'lr':self.optimizer.param_groups[0]['lr']},
-                        step = self.epoch)
+                       'val_loss': val_loss_mean,
+                       'val_dice': self.average_global_dc,
+                       'lr': self.optimizer.param_groups[0]['lr']},
+                      step=self.epoch)
             if not continue_training:
                 # allows for early stopping
                 break
 
             self.epoch += 1
-            self.print_to_log_file("This epoch took %f s\n" % (epoch_end_time - epoch_start_time))
+            self.print_to_log_file("This epoch took %f s\n" %
+                                   (epoch_end_time - epoch_start_time))
 
-        self.epoch -= 1  # if we don't do this we can get a problem with loading model_final_checkpoint.
+        # if we don't do this we can get a problem with loading model_final_checkpoint.
+        self.epoch -= 1
 
-        if self.save_final_checkpoint: self.save_checkpoint(join(self.output_folder, "model_final_checkpoint.model"))
+        if self.save_final_checkpoint:
+            self.save_checkpoint(
+                join(self.output_folder, "model_final_checkpoint.model"))
         # now we can delete latest as it will be identical with final
         if isfile(join(self.output_folder, "model_latest.model")):
             os.remove(join(self.output_folder, "model_latest.model"))

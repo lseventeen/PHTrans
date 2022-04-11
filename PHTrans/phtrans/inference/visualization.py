@@ -10,10 +10,10 @@ import matplotlib.pyplot as plt  # 载入需要的库
 
 def set_colour(img_path,data_path,slice,name):
     img_nii = sitk.ReadImage(img_path)
-    pre_nii = sitk.ReadImage(data_path) # 读取其中一个volume数据
+    pre_nii = sitk.ReadImage(data_path) 
 
-    img_3D = sitk.GetArrayFromImage(img_nii) # 提取数据中心的array
-    pre_3D = sitk.GetArrayFromImage(pre_nii) # 提取数据中心的array
+    img_3D = sitk.GetArrayFromImage(img_nii) 
+    pre_3D = sitk.GetArrayFromImage(pre_nii) 
 
     img = img_3D[slice,...]
     pre = pre_3D[slice,...]
@@ -24,18 +24,18 @@ def set_colour(img_path,data_path,slice,name):
     for i in range(H):
         for j in range(W):
             if pre[i,j] == 1:
-                colour[i,j,:] = [0,0,255] # 纯红
+                colour[i,j,:] = [0,0,255] 
             elif pre[i,j] == 2:
-                colour[i,j,:] = [255,255,0] #青色
+                colour[i,j,:] = [255,255,0] 
             elif pre[i,j] == 3:
-                colour[i,j,:] = [0,128,0] #纯绿
+                colour[i,j,:] = [0,128,0] 
                 
             elif pre[i,j] == 4:
-                colour[i,j,:] = [203,255,192] #粉红
+                colour[i,j,:] = [203,255,192] 
             elif pre[i,j] == 6:
-                colour[i,j,:] = [255,0,0] #蓝色
+                colour[i,j,:] = [255,0,0] 
             elif pre[i,j] == 7:
-                colour[i,j,:] = [255,0,255] #纯黄
+                colour[i,j,:] = [255,0,255] 
             elif pre[i,j] == 8:
                 colour[i,j,:] = [128,0,128] #紫色
             elif pre[i,j] == 11:
