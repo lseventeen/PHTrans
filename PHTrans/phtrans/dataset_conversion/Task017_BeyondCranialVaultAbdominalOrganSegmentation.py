@@ -2,9 +2,13 @@ from collections import OrderedDict
 from nnunet.paths import nnUNet_raw_data
 from batchgenerators.utilities.file_and_folder_operations import *
 import shutil
+import argparse
 
-if __name__ == "__main__":
-    base = "/home/lwt/data/synapse/RawData/"
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-dataset_path", type=str,
+                        default='/home/lwt/data/synapse/RawData/')
+    args = parser.parse_args()
 
     task_id = 17
     task_name = "AbdominalOrganSegmentation"
@@ -29,8 +33,8 @@ if __name__ == "__main__":
     maybe_mkdir_p(labelsts)
 
     val_id = test_id = [1, 2, 3, 4, 8, 22, 25, 29, 32, 35, 36, 38]
-    img_folder = join(base, "Training/img")
-    label_folder = join(base, "Training/label")
+    img_folder = join(args.dataset_path, "Training/img")
+    label_folder = join(args.dataset_path, "Training/label")
     train_patient_names = []
     test_patient_names = []
     train_patients = subfiles(img_folder, join=False, suffix='nii.gz')
@@ -45,7 +49,6 @@ if __name__ == "__main__":
         shutil.copy(label_file, join(labelstr, train_patient_name))
         train_patient_names.append(train_patient_name)
 
-    # test_patients = subfiles(test_folder, join=False, suffix=".nii.gz")
     for p in test_id:
         test_patient = f"img{p:04d}.nii.gz"
         test_patient_name = f'{prefix}_{p:03d}.nii.gz'
@@ -101,3 +104,9 @@ if __name__ == "__main__":
     splits[-1]['val'] = [i[:7]
                          for i in train_patient_names if int(i[4:7]) in val_id]
     save_pickle(splits, join(out_base, "splits_final.pkl"))
+
+
+if __name__ == "__main__":
+   main()
+
+    

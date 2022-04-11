@@ -9,6 +9,8 @@ setup(name='phtrans',
       entry_points={
           'console_scripts': [
               'PHTrans_train = phtrans.run.run_training:main',
+              'PHTrans_BCV = phtrans.dataset_conversion.Task017_BeyondCranialVaultAbdominalOrganSegmentation:main',
+              'PHTrans_ACDC = phtrans.dataset_conversion.Task027_AutomaticCardiacDetectionChallenge:main',
           ],
       },
       )
