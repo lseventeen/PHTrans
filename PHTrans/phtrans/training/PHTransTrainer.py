@@ -158,7 +158,6 @@ class PHTransTrainer(nnUNetTrainer):
         net_nonlin_kwargs = {'negative_slope': 1e-2, 'inplace': True}
 
         if self.custom_network is None:
-            net_nonlin = nn.LeakyReLU
             self.network = Generic_UNet(self.num_input_channels, self.base_num_features, self.num_classes,
                                         len(self.net_num_pool_op_kernel_sizes),
                                         self.conv_per_stage, 2, conv_op, norm_op, norm_op_kwargs, dropout_op,
