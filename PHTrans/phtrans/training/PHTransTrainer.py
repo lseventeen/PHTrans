@@ -14,6 +14,8 @@ from nnunet.training.loss_functions.deep_supervision import MultipleOutputLoss2
 from nnunet.utilities.to_torch import maybe_to_torch, to_cuda
 from nnunet.network_architecture.generic_UNet import Generic_UNet
 from phtrans.network_architecture.phtrans import PHTrans
+from phtrans.network_architecture.swin_unetr import Swin_UNETR
+from phtrans.network_architecture.unetr import UNETR
 from nnunet.network_architecture.initialization import InitWeights_He
 from nnunet.network_architecture.neural_network import SegmentationNetwork
 from nnunet.training.data_augmentation.default_data_augmentation import default_2D_augmentation_params, \
@@ -27,7 +29,7 @@ from torch.cuda.amp import autocast
 from nnunet.training.learning_rate.poly_lr import poly_lr
 from batchgenerators.utilities.file_and_folder_operations import *
 from nnunet.utilities.tensor_utilities import sum_tensor
-
+from phtrans.training.utils import set_weight_decay
 
 class PHTransTrainer(nnUNetTrainer):
     """
@@ -36,7 +38,7 @@ class PHTransTrainer(nnUNetTrainer):
 
     def __init__(self, plans_file, fold, output_folder=None, dataset_directory=None, batch_dice=True, stage=None,
                  unpack_data=True, deterministic=True, fp16=False, experiment_id=None, custom_batch_size=None,
-                 custom_network=False, task_id=None, count_params=False):
+                 custom_network=None, task_id=None, count_params=False):
 
         os.environ['nnunet_use_progress_bar'] = "1"
         self.experiment_id = experiment_id
@@ -54,8 +56,12 @@ class PHTransTrainer(nnUNetTrainer):
         self.task_id = task_id
         self.average_global_dc = 0
         self.count_params = count_params
+        if self.custom_network == "UNETR" or self.custom_network == "Swin_UNETR":
+            self.deep_supervision = False 
+        else:
+            self.deep_supervision = True
 
-    def initialize(self, training=True, force_load_plans=False, nnunet=True):
+    def initialize(self, training=True, force_load_plans=False):
         """
         - replaced get_default_augmentation with get_moreDA_augmentation
         - enforce to only run this code once
@@ -76,22 +82,22 @@ class PHTransTrainer(nnUNetTrainer):
             self.setup_DA_params()
 
             ################# Here we wrap the loss for deep supervision ############
+            if self.deep_supervision:
+                net_numpool = len(self.net_num_pool_op_kernel_sizes)
 
-            net_numpool = len(self.net_num_pool_op_kernel_sizes)
+                # we give each output a weight which decreases exponentially (division by 2) as the resolution decreases
+                # this gives higher resolution outputs more weight in the loss
+                weights = np.array([1 / (2 ** i) for i in range(net_numpool)])
 
-            # we give each output a weight which decreases exponentially (division by 2) as the resolution decreases
-            # this gives higher resolution outputs more weight in the loss
-            weights = np.array([1 / (2 ** i) for i in range(net_numpool)])
-
-            # we don't use the lowest 2 outputs. Normalize weights so that they sum to 1
-            mask = np.array([True] + [True if i < net_numpool -
+                # we don't use the lowest 2 outputs. Normalize weights so that they sum to 1
+                mask = np.array([True] + [True if i < net_numpool -
                             1 else False for i in range(1, net_numpool)])
-            weights[~mask] = 0
-            weights = weights / weights.sum()
-            self.ds_loss_weights = weights
-            # now wrap the loss
-            self.loss = MultipleOutputLoss2(self.loss, self.ds_loss_weights)
-            ################# END ###################
+                weights[~mask] = 0
+                weights = weights / weights.sum()
+                self.ds_loss_weights = weights
+                # now wrap the loss
+                self.loss = MultipleOutputLoss2(self.loss, self.ds_loss_weights)
+                ################# END ###################
 
             self.folder_with_preprocessed_data = join(self.dataset_directory, self.plans['data_identifier'] +
                                                       "_stage%d" % self.stage)
@@ -122,7 +128,7 @@ class PHTransTrainer(nnUNetTrainer):
             else:
                 pass
 
-            self.initialize_network(nnunet=nnunet)
+            self.initialize_network()
             self.initialize_optimizer_and_scheduler()
 
             assert isinstance(
@@ -132,7 +138,7 @@ class PHTransTrainer(nnUNetTrainer):
                 'self.was_initialized is True, not running self.initialize again')
         self.was_initialized = True
 
-    def initialize_network(self, nnunet=True):
+    def initialize_network(self):
         """
         - momentum 0.99
         - SGD instead of Adam
@@ -166,16 +172,45 @@ class PHTransTrainer(nnUNetTrainer):
                                             1e-2),
                                         self.net_num_pool_op_kernel_sizes, self.net_conv_kernel_sizes, False, True, True)
         elif self.custom_network == "PHTrans" and self.task_id == 17:
-            self.network = PHTrans(img_size=self.patch_size,  base_num_features=24,
-                                   num_classes=self.num_classes, num_pool=len(self.net_num_pool_op_kernel_sizes), image_channels=self.num_input_channels,
-                                   num_only_conv_stage=2, num_conv_per_stage=2, feat_map_mul_on_downscale=2, conv_op=conv_op,
-                                   norm_op=norm_op, norm_op_kwargs={'eps': 1e-5, 'affine': True}, dropout_op=dropout_op, dropout_op_kwargs={'p': 0.1, 'inplace': True},
-                                   nonlin=nn.GELU, nonlin_kwargs={'negative_slope': 1e-2, 'inplace': True}, deep_supervision=True,
-                                   weightInitializer=InitWeights_He(1e-2), pool_op_kernel_sizes=self.net_num_pool_op_kernel_sizes,
-                                   conv_kernel_sizes=self.net_conv_kernel_sizes, max_num_features_factor=13, depths=[2, 2, 2, 2], num_heads=[3, 6, 12, 24],
-                                   window_size=[3, 6, 6], mlp_ratio=4., qkv_bias=True, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
-                                   drop_path_rate=0.2, norm_layer=nn.LayerNorm, use_checkpoint=False,)
-
+            self.network = PHTrans(img_size=self.patch_size,  
+                                   base_num_features=24,
+                                   num_classes=self.num_classes, 
+                                   num_pool=len(self.net_num_pool_op_kernel_sizes), 
+                                   image_channels=self.num_input_channels,
+                                   pool_op_kernel_sizes=self.net_num_pool_op_kernel_sizes,
+                                   conv_kernel_sizes=self.net_conv_kernel_sizes, 
+                                   deep_supervision=True,
+                                   max_num_features=24*13, 
+                                   depths=[2, 2, 2, 2], 
+                                   num_heads=[3, 6, 12, 24],
+                                   window_size=[3, 6, 6], 
+                                   drop_path_rate=0.2 )
+        elif self.custom_network == "UNETR" and self.task_id == 17:
+            self.network = UNETR(
+            in_channels=1,
+            out_channels=self.num_classes,
+            img_size=self.patch_size,
+            feature_size=16,
+            hidden_size=768,
+            mlp_dim=3072,
+            num_heads=12,
+            pos_embed='perceptron',
+            norm_name='instance',
+            conv_block=True,
+            res_block=True,
+            dropout_rate=0.0,
+            )
+        elif self.custom_network == "Swin_UNETR" and self.task_id == 17:
+            self.network = Swin_UNETR(
+            img_size=self.patch_size, 
+            in_chans=self.num_input_channels,
+            num_classes=self.num_classes,
+            patch_size=[1,2,2], 
+            embed_dim=48, 
+            depths=[2, 2, 2, 2], 
+            num_heads=[3, 6, 12, 24],
+            window_size=[3,6,6], 
+           )
         if torch.cuda.is_available():
             self.network.cuda()
         self.network.inference_apply_nonlin = softmax_helper
@@ -183,11 +218,18 @@ class PHTransTrainer(nnUNetTrainer):
             input = torch.randn(1, 1, 48, 192, 192).cuda()
             macs, params = profile(self.network.cuda(), inputs=(input, ))
             macs, params = clever_format([macs, params], "%.3f")
-            print(f"Flops: {macs/2}  params:{params}")
+            # print(f"Flops: {macs/2}  params:{params}")
 
     def initialize_optimizer_and_scheduler(self):
         assert self.network is not None, "self.initialize_network must be called first"
-        self.optimizer = torch.optim.SGD(self.network.parameters(), self.initial_lr, weight_decay=self.weight_decay,
+        if self.custom_network == "PHTrans":
+            skip_keywords = {}
+            if hasattr(self.network, 'no_weight_decay_keywords'):
+                skip_keywords = self.network.no_weight_decay_keywords()
+            parameters = set_weight_decay(self.network, skip_keywords)
+        else:
+            parameters = self.network.parameters()
+        self.optimizer = torch.optim.SGD(parameters, self.initial_lr, weight_decay=self.weight_decay,
                                          momentum=0.99, nesterov=True)
         self.lr_scheduler = None
 
@@ -381,8 +423,8 @@ class PHTransTrainer(nnUNetTrainer):
 
         :return:
         """
-
-        self.deep_supervision_scales = [[1, 1, 1]] + list(list(i) for i in 1 / np.cumprod(
+        if self.deep_supervision:
+            self.deep_supervision_scales = [[1, 1, 1]] + list(list(i) for i in 1 / np.cumprod(
             np.vstack(self.net_num_pool_op_kernel_sizes), axis=0))[:-1]
 
         if self.threeD:
@@ -487,8 +529,9 @@ class PHTransTrainer(nnUNetTrainer):
         return ret
 
     def run_online_evaluation(self, output, target):
-        target = target[0]
-        output = output[0]
+        if self.deep_supervision:
+            target = target[0]
+            output = output[0]
         with torch.no_grad():
             num_classes = output.shape[1]
             output_softmax = softmax_helper(output)
@@ -538,7 +581,26 @@ class PHTransTrainer(nnUNetTrainer):
             self.online_eval_tp.append(list(tp_hard))
             self.online_eval_fp.append(list(fp_hard))
             self.online_eval_fn.append(list(fn_hard))
+    def finish_online_evaluation(self):
+        self.online_eval_tp = np.sum(self.online_eval_tp, 0)
+        self.online_eval_fp = np.sum(self.online_eval_fp, 0)
+        self.online_eval_fn = np.sum(self.online_eval_fn, 0)
 
+        global_dc_per_class = [i for i in [2 * i / (2 * i + j + k) for i, j, k in
+                                           zip(self.online_eval_tp, self.online_eval_fp, self.online_eval_fn)]
+                               if not np.isnan(i)]
+        self.average_global_dc = np.mean(global_dc_per_class)
+        self.all_val_eval_metrics.append(np.mean(global_dc_per_class))
+
+        self.print_to_log_file("Average global foreground Dice:", [np.round(i, 4) for i in global_dc_per_class])
+        self.print_to_log_file("Average all global foreground Dice:", np.round(self.average_global_dc, 4))
+        self.print_to_log_file("(interpret this as an estimate for the Dice of the different classes. This is not "
+                               "exact.)")
+
+        self.online_eval_foreground_dc = []
+        self.online_eval_tp = []
+        self.online_eval_fp = []
+        self.online_eval_fn = []
     def process_plans(self, plans):
         if self.stage is None:
             assert len(list(plans['plans_per_stage'].keys())) == 1, \
@@ -635,6 +697,14 @@ class PHTransTrainer(nnUNetTrainer):
             self.conv_per_stage = 2
 
     def run_training(self):
+
+        self.maybe_update_lr(self.epoch)  # if we dont overwrite epoch then self.epoch+1 is used which is not what we
+        # want at the start of the training
+        ds = self.network.do_ds
+        self.network.do_ds = True
+        self.network.do_ds = ds
+        self.save_debug_information()
+        
         if not torch.cuda.is_available():
             self.print_to_log_file(
                 "WARNING!!! You are attempting to run training on a CPU (torch.cuda.is_available() is False). This can be VERY slow!")

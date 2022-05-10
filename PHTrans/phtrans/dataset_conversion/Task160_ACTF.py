@@ -37,7 +37,6 @@ def main():
 
    
     train_image = subfiles(train_image_folder, join=False, suffix='nii.gz')
-    train_label = subfiles(train_label_folder, join=False, suffix='nii.gz')
     test_image = subfiles(test_image_folder, join=False, suffix='nii.gz')
     train_names = []
     test_names = []
@@ -48,7 +47,7 @@ def main():
         shutil.copy(join(train_label_folder, f"{i[:-12]}.nii.gz"), join(labelstr, train_name))
         train_names.append(train_name)
     for i in test_image:
-        test_name = f'{task_name}_{int(i[5:9]):04d}.nii.gz'
+        test_name = f'test_{int(i[5:9]):04d}_0000.nii.gz'
         shutil.copy(join(test_image_folder, i), join(imagests, test_name))
         test_names.append(test_name)
     json_dict = OrderedDict()

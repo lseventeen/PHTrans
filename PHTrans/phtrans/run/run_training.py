@@ -30,17 +30,17 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-network", type=str, default='3d_fullres')
     parser.add_argument("-network_trainer", type=str, default='PHTransTrainer')
-    parser.add_argument("-task", default="17",
+    parser.add_argument("-task", default="017",
                         help="can be task name or task id")
     parser.add_argument("--fold", default="0", help='0, 1, ..., 5 or \'all\'')
     parser.add_argument("-cn", "--custom_network",required=False, default=None)
-    parser.add_argument("-ei", "--experiment_id", default="flare")
+    parser.add_argument("-ei", "--experiment_id", default="PHTrans")
     parser.add_argument("-eei", "--exist_experiment_id", required=False, default=None)
     parser.add_argument("-cbs", "--custom_batch_size", required=False, default=None,type=int)
     parser.add_argument("-val", "--validation_only", help="use this if you want to only run the validation",
                         action="store_true")
     parser.add_argument("-wm", "--wandb_mode",
-                        required=False, default="online")
+                        required=False, default="offline")
     
     # parser.add_argument("-c", "--continue_training", help="use this if you want to continue a training",
     #                     action="store_true")
