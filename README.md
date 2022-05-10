@@ -26,13 +26,13 @@ pip install -e .
 ```
  
 ## Datasets processing
-Download datasets [BCV](https://www.dropbox.com/sh/z4hbbzqai0ilqht/AAARqnQhjq3wQcSVFNR__6xNa?dl=0https://www.dropbox.com/sh/z4hbbzqai0ilqht/AAARqnQhjq3wQcSVFNR__6xNa?dl=0) and [ACDC](https://acdc.creatis.insa-lyon.fr/description/databases.html). Type this in the terminal to perform dataset partitioning followed by [nnFormer](https://github.com/282857341/nnFormer).
+Download datasets [BCV](https://www.dropbox.com/sh/z4hbbzqai0ilqht/AAARqnQhjq3wQcSVFNR__6xNa?dl=0https://www.dropbox.com/sh/z4hbbzqai0ilqht/AAARqnQhjq3wQcSVFNR__6xNa?dl=0) and [ACDC](https://acdc.creatis.insa-lyon.fr/description/databases.html). Type this in the terminal to perform dataset partitioning followed by [nnFormer](https://github.com/282857341/nnFormer). 
  
 ```
 PHTrans_BCV -dataset_path DATASET_PATH
 PHTrans_ACDC -dataset_path DATASET_PATH
 ```
- 
+Preprocess the BCV and ACDC datasets according to the uploaded nnUNet package
 ## Training
 Type this in terminal to run train
  
