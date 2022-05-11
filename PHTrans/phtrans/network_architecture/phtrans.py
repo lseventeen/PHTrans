@@ -178,8 +178,8 @@ class PHTrans(SegmentationNetwork):
                  drop_rate=0., attn_drop_rate=0., dropout_p=0.1,drop_path_rate=0.2,
                  norm_layer=nn.LayerNorm, use_checkpoint=False, **kwargs):
         super().__init__()
-
-        conv_op = nn.Conv3d
+        self.num_classes = num_classes
+        self.conv_op = nn.Conv3d
         norm_op = nn.InstanceNorm3d
         norm_op_kwargs = {'eps': 1e-5, 'affine': True}
         dropout_op = nn.Dropout3d 
@@ -208,7 +208,7 @@ class PHTrans(SegmentationNetwork):
                                    i_layer >= num_only_conv_stage) else None,
                                window_size=window_size,
                                image_channels=image_channels, num_conv_per_stage=num_conv_per_stage,
-                               conv_op=conv_op, norm_op=norm_op, norm_op_kwargs=norm_op_kwargs, dropout_op=dropout_op,
+                               conv_op=self.conv_op, norm_op=norm_op, norm_op_kwargs=norm_op_kwargs, dropout_op=dropout_op,
                                dropout_op_kwargs=dropout_op_kwargs, nonlin=nonlin, nonlin_kwargs=nonlin_kwargs,
                                conv_kernel_sizes=conv_kernel_sizes, conv_pad_sizes=conv_pad_sizes, pool_op_kernel_sizes=pool_op_kernel_sizes,
                                max_num_features=max_num_features,
@@ -235,7 +235,7 @@ class PHTrans(SegmentationNetwork):
                                    i_layer >= num_only_conv_stage) else None,
                                window_size=window_size,
                                image_channels=image_channels, num_conv_per_stage=num_conv_per_stage,
-                               conv_op=conv_op, norm_op=norm_op, norm_op_kwargs=norm_op_kwargs, dropout_op=dropout_op,
+                               conv_op=self.conv_op, norm_op=norm_op, norm_op_kwargs=norm_op_kwargs, dropout_op=dropout_op,
                                dropout_op_kwargs=dropout_op_kwargs, nonlin=nonlin, nonlin_kwargs=nonlin_kwargs,
                                conv_kernel_sizes=conv_kernel_sizes, conv_pad_sizes=conv_pad_sizes, pool_op_kernel_sizes=pool_op_kernel_sizes,
                                max_num_features=max_num_features,
@@ -248,7 +248,7 @@ class PHTrans(SegmentationNetwork):
                                down_or_upsample=nn.ConvTranspose3d if (
                                    i_layer > 0) else None,
                                feat_map_mul_on_downscale=feat_map_mul_on_downscale,
-                               num_classes=num_classes,
+                               num_classes=self.num_classes,
                                use_checkpoint=use_checkpoint,
                                is_encoder=False)
             self.up_layers.append(layer)
