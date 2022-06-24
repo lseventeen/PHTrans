@@ -28,14 +28,15 @@ def main():
     parser.add_argument('-t', '--task_name', help='task name or task ID, required.',
                         required=True)
     parser.add_argument("-ei", "--experiment_id", required=True)
-    parser.add_argument("-i", '--input_folder', help="Must contain all modalities for each patient in the correct"
-                                                     " order (same as training). Files must be named "
-                                                     "CASENAME_XXXX.nii.gz where XXXX is the modality "
-                                                     "identifier (0000, 0001, etc)", 
-                        required=True)
-    parser.add_argument('-o', "--output_folder", 
-                        required=True, 
-                        help="folder for saving predictions")
+    # parser.add_argument("-i", '--input_folder', help="Must contain all modalities for each patient in the correct"
+    #                                                  " order (same as training). Files must be named "
+    #                                                  "CASENAME_XXXX.nii.gz where XXXX is the modality "
+    #                                                  "identifier (0000, 0001, etc)", 
+    #                     required=True)
+    # parser.add_argument('-o', "--output_folder", 
+    #                     required=True, 
+    #                     help="folder for saving predictions")
+  
     parser.add_argument('-tr', '--trainer_class_name',
                         help='Name of the nnUNetTrainer used for 2D U-Net, full resolution 3D U-Net and low resolution '
                              'U-Net. The default is %s. If you are running inference with the cascade and the folder '
@@ -132,8 +133,8 @@ def main():
                              'that yhis is not recommended (mixed precision is ~2x faster!)')
 
     args = parser.parse_args()
-    input_folder = args.input_folder
-    output_folder = args.output_folder
+    # input_folder = args.input_folder
+    # output_folder = args.output_folder
     experiment_id=args.experiment_id
     part_id = args.part_id
     num_parts = args.num_parts
@@ -192,10 +193,10 @@ def main():
     elif all_in_gpu == "False":
         all_in_gpu = False
 
-    # input_folder = join(nnUNet_raw_data, task_name,"imagesTs")
-    # folds_path = "all" if folds == "all" else "fold_%d" % int(folds)
-    # output_folder = join(network_training_output_dir, model, task_name, trainer_class_name + "__" +
-    #                           args.plans_identifier, folds_path, experiment_id,args.chk)
+    input_folder = "/home/lwt/data/flare22/Validation"
+    folds_path = "all" if folds[0] == "all" else "fold_%d" % int(folds[0])
+    output_folder = join(network_training_output_dir, model, task_name, trainer_class_name + "__" +
+                              args.plans_identifier, folds_path, experiment_id, args.chk)
 
     # we need to catch the case where model is 3d cascade fullres and the low resolution folder has not been set.
     # In that case we need to try and predict with 3d low res first

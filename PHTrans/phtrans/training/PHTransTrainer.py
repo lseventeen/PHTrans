@@ -185,6 +185,20 @@ class PHTransTrainer(nnUNetTrainer):
                                    num_heads=[3, 6, 12, 24],
                                    window_size=[3, 6, 6], 
                                    drop_path_rate=0.2 )
+        elif self.custom_network == "PHTrans" and self.task_id == 161:
+            self.network = PHTrans(img_size=self.patch_size,  
+                                   base_num_features=24,
+                                   num_classes=self.num_classes, 
+                                   num_pool=len(self.net_num_pool_op_kernel_sizes), 
+                                   image_channels=self.num_input_channels,
+                                   pool_op_kernel_sizes=self.net_num_pool_op_kernel_sizes,
+                                   conv_kernel_sizes=self.net_conv_kernel_sizes, 
+                                   deep_supervision=True,
+                                   max_num_features=24*13, 
+                                   depths=[2, 2, 2, 2], 
+                                   num_heads=[3, 6, 12, 24],
+                                   window_size=[5, 7, 6], 
+                                   drop_path_rate=0.2 )
         elif self.custom_network == "UNETR" and self.task_id == 17:
             self.network = UNETR(
             in_channels=1,
@@ -218,17 +232,17 @@ class PHTransTrainer(nnUNetTrainer):
             input = torch.randn(1, 1, 48, 192, 192).cuda()
             macs, params = profile(self.network.cuda(), inputs=(input, ))
             macs, params = clever_format([macs, params], "%.3f")
-            # print(f"Flops: {macs/2}  params:{params}")
+            print(f"Flops: {int(macs)/2}  params:{params}")
 
     def initialize_optimizer_and_scheduler(self):
         assert self.network is not None, "self.initialize_network must be called first"
-        if self.custom_network == "PHTrans":
-            skip_keywords = {}
-            if hasattr(self.network, 'no_weight_decay_keywords'):
-                skip_keywords = self.network.no_weight_decay_keywords()
-            parameters = set_weight_decay(self.network, skip_keywords)
-        else:
-            parameters = self.network.parameters()
+        # if self.custom_network == "PHTrans":
+        #     skip_keywords = {}
+        #     if hasattr(self.network, 'no_weight_decay_keywords'):
+        #         skip_keywords = self.network.no_weight_decay_keywords()
+        #     parameters = set_weight_decay(self.network, skip_keywords)
+        # else:
+        parameters = self.network.parameters()
         self.optimizer = torch.optim.SGD(parameters, self.initial_lr, weight_decay=self.weight_decay,
                                          momentum=0.99, nesterov=True)
         self.lr_scheduler = None
@@ -511,22 +525,22 @@ class PHTransTrainer(nnUNetTrainer):
                                        "0.95 and network weights have been reinitialized")
         return continue_training
 
-    def run_training(self):
-        """
-        if we run with -c then we need to set the correct lr for the first epoch, otherwise it will run the first
-        continued epoch with self.initial_lr
+    # def run_training(self):
+    #     """
+    #     if we run with -c then we need to set the correct lr for the first epoch, otherwise it will run the first
+    #     continued epoch with self.initial_lr
 
-        we also need to make sure deep supervision in the network is enabled for training, thus the wrapper
-        :return:
-        """
-        self.maybe_update_lr(
-            self.epoch)  # if we dont overwrite epoch then self.epoch+1 is used which is not what we
-        # want at the start of the training
-        ds = self.network.do_ds
-        self.network.do_ds = True
-        ret = super().run_training()
-        self.network.do_ds = ds
-        return ret
+    #     we also need to make sure deep supervision in the network is enabled for training, thus the wrapper
+    #     :return:
+    #     """
+    #     self.maybe_update_lr(
+    #         self.epoch)  # if we dont overwrite epoch then self.epoch+1 is used which is not what we
+    #     # want at the start of the training
+    #     ds = self.network.do_ds
+    #     self.network.do_ds = True
+    #     ret = super().run_training()
+    #     self.network.do_ds = ds
+    #     return ret
 
     def run_online_evaluation(self, output, target):
         if self.deep_supervision:

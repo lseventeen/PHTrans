@@ -325,8 +325,7 @@ class SegmentationNetwork(NeuralNetwork):
             else:
                 if verbose: print("using precomputed Gaussian")
                 gaussian_importance_map = self._gaussian_3d
-
-            gaussian_importance_map = torch.from_numpy(gaussian_importance_map)
+                gaussian_importance_map = torch.from_numpy(gaussian_importance_map)
 
             #predict on cpu if cuda not available
             if torch.cuda.is_available():
