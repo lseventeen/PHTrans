@@ -199,6 +199,20 @@ class PHTransTrainer(nnUNetTrainer):
                                    num_heads=[3, 6, 12, 24],
                                    window_size=[5, 7, 6], 
                                    drop_path_rate=0.2 )
+        elif self.custom_network == "PHTrans" and self.task_id == 171 or 172:
+            self.network = PHTrans(img_size=self.patch_size,  
+                                   base_num_features=36,
+                                   num_classes=self.num_classes, 
+                                   num_pool=len(self.net_num_pool_op_kernel_sizes), 
+                                   image_channels=self.num_input_channels,
+                                   pool_op_kernel_sizes=self.net_num_pool_op_kernel_sizes,
+                                   conv_kernel_sizes=self.net_conv_kernel_sizes, 
+                                   deep_supervision=True,
+                                   max_num_features=360, 
+                                   depths=[2, 2, 2, 2], 
+                                   num_heads=[3, 6, 12, 24],
+                                   window_size=[4, 5, 5], 
+                                   drop_path_rate=0.2)
         elif self.custom_network == "UNETR" and self.task_id == 17:
             self.network = UNETR(
             in_channels=1,
