@@ -37,7 +37,7 @@ Preprocess the BCV and ACDC datasets according to the uploaded nnUNet package
 Type this in terminal to run train
  
 ```
-PHTrans_train -task 17OR27 
+PHTrans_train -task 17OR27 --fold 0
 ```
 ## Test
 Type this in terminal to test:
