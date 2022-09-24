@@ -6,7 +6,9 @@ This repository is the official PyTorch code for the paper PHTrans: Parallelly A
   <img src="PHTrans/PHTrans.png" width="70%">
 </div>
 
- 
+## News
+2022.9.24: The solution of Two-stage PHTrans combined with self-training wins Winner Finalist Award at [MICCAI FLARE2022](https://flare22.grand-challenge.org/awards/) (Comprehensive evaluation 3rd, Segmentation performance evaluation: DSC 1st and NSD 2nd) [CODE](https://github.com/lseventeen/FLARE22-TwoStagePHTrans) & [PAPER](https://arxiv.org/abs/2207.11512)
+
 ## Prerequisites
  
 
