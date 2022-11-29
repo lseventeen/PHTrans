@@ -194,6 +194,7 @@ def main():
         all_in_gpu = False
 
     input_folder = "/home/lwt/data/flare22/Validation"
+    # input_folder = join(nnUNet_raw_data, task_name,"imagesTs")
     folds_path = "all" if folds[0] == "all" else "fold_%d" % int(folds[0])
     output_folder = join(network_training_output_dir, model, task_name, trainer_class_name + "__" +
                               args.plans_identifier, folds_path, experiment_id, args.chk)

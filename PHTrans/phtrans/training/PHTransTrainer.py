@@ -212,6 +212,7 @@ class PHTransTrainer(nnUNetTrainer):
                                    depths=[2, 2, 2, 2], 
                                    num_heads=[3, 6, 12, 24],
                                    window_size=[4, 5, 5], 
+                                   dropout_p=0.,
                                    drop_path_rate=0.2)
         elif self.custom_network == "UNETR" and self.task_id == 17:
             self.network = UNETR(

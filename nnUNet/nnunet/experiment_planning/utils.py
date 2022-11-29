@@ -133,7 +133,7 @@ def crop(task_string, override=False, num_threads=default_num_threads):
     imgcrop = ImageCropper(num_threads, cropped_out_dir)
     imgcrop.run_cropping(lists, overwrite_existing=override)
     shutil.copy(join(nnUNet_raw_data, task_string, "dataset.json"), cropped_out_dir)
-
+    shutil.copy(join(nnUNet_raw_data, task_string, "splits_final.pkl"), cropped_out_dir)
 
 def analyze_dataset(task_string, override=False, collect_intensityproperties=True, num_processes=default_num_threads):
     cropped_out_dir = join(nnUNet_cropped_data, task_string)
