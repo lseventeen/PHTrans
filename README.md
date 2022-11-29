@@ -6,7 +6,9 @@ This repository is the official PyTorch code for the paper PHTrans: Parallelly A
   <img src="PHTrans/PHTrans.png" width="70%">
 </div>
 
- 
+## News
+2022.9.24: The solution of Two-stage PHTrans combined with self-training won Winner Finalist Award at [MICCAI FLARE2022](https://flare22.grand-challenge.org/awards/) ([CODE](https://github.com/lseventeen/FLARE22-TwoStagePHTrans) & [PAPER](https://arxiv.org/abs/2207.11512)).
+
 ## Prerequisites
  
 
@@ -37,7 +39,7 @@ Preprocess the BCV and ACDC datasets according to the uploaded nnUNet package
 Type this in terminal to run train
  
 ```
-PHTrans_train -task 17OR27 
+PHTrans_train -task 17OR27 --fold 0
 ```
 ## Test
 Type this in terminal to test:
