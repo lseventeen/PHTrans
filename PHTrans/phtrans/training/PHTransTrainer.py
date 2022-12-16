@@ -621,11 +621,26 @@ class PHTransTrainer(nnUNetTrainer):
         self.average_global_dc = np.mean(global_dc_per_class)
         self.all_val_eval_metrics.append(np.mean(global_dc_per_class))
 
-        self.print_to_log_file("Average global foreground Dice:", [np.round(i, 4) for i in global_dc_per_class])
-        self.print_to_log_file("Average all global foreground Dice:", np.round(self.average_global_dc, 4))
+        self.print_to_log_file("VAL Average global foreground Dice:", [np.round(i, 4) for i in global_dc_per_class])
+        self.print_to_log_file("VAL Average all global foreground Dice:", np.round(self.average_global_dc, 4))
         self.print_to_log_file("(interpret this as an estimate for the Dice of the different classes. This is not "
                                "exact.)")
 
+        self.online_eval_foreground_dc = []
+        self.online_eval_tp = []
+        self.online_eval_fp = []
+        self.online_eval_fn = []
+    def finish_online_train_evaluation(self):
+        self.online_eval_tp = np.sum(self.online_eval_tp, 0)
+        self.online_eval_fp = np.sum(self.online_eval_fp, 0)
+        self.online_eval_fn = np.sum(self.online_eval_fn, 0)
+
+        global_dc_per_class = [i for i in [2 * i / (2 * i + j + k) for i, j, k in
+                                           zip(self.online_eval_tp, self.online_eval_fp, self.online_eval_fn)]
+                               if not np.isnan(i)]
+        self.average_global_dc = np.mean(global_dc_per_class)
+        self.print_to_log_file("TRAIN Average global foreground Dice:", [np.round(i, 4) for i in global_dc_per_class])
+        self.print_to_log_file("TRAIN Average all global foreground Dice:", np.round(self.average_global_dc, 4))
         self.online_eval_foreground_dc = []
         self.online_eval_tp = []
         self.online_eval_fp = []
@@ -784,6 +799,11 @@ class PHTransTrainer(nnUNetTrainer):
             self.all_tr_losses.append(train_loss_mean)
             self.print_to_log_file("train loss : %.4f" %
                                    self.all_tr_losses[-1])
+            self.finish_online_train_evaluation()          
+            wandb.log({'train_loss': train_loss_mean,
+                        'train_dice': self.average_global_dc,
+                       'lr': self.optimizer.param_groups[0]['lr']},
+                      step=self.epoch)
 
             with torch.no_grad():
                 # validation with train=False
@@ -813,10 +833,8 @@ class PHTransTrainer(nnUNetTrainer):
             continue_training = self.on_epoch_end()
 
             epoch_end_time = time()
-            wandb.log({'train_loss': train_loss_mean,
-                       'val_loss': val_loss_mean,
-                       'val_dice': self.average_global_dc,
-                       'lr': self.optimizer.param_groups[0]['lr']},
+            wandb.log({'val_loss': val_loss_mean,
+                       'val_dice': self.average_global_dc},
                       step=self.epoch)
             if not continue_training:
                 # allows for early stopping
